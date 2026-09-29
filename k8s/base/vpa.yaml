@@ -1,0 +1,18 @@
+# updateMode "Off" = recommend only, never evict/mutate pods. Running VPA
+# in Auto alongside an HPA that also scales on CPU creates a feedback
+# loop: VPA raises the CPU request -> computed utilisation (usage/request)
+# drops -> HPA scales in -> per-pod load rises -> VPA raises the request
+# again. Recommender mode + a human decision is the standard way to avoid
+# two autoscalers fighting over the same signal.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: backend-vpa
+  namespace: civicpulse
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  updatePolicy:
+    updateMode: "Off"

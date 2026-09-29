@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CivicPulse</title>
+    <!--
+      Runtime configuration, NOT build-time. This file is written by
+      docker-entrypoint.sh from environment variables when the container
+      starts, so the same built image works in dev, staging and prod
+      without a rebuild. See docs/adr/0002-frontend-runtime-config.md.
+    -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

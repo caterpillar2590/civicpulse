@@ -1,0 +1,122 @@
+# Development compose file. Builds images locally and bind-mounts backend
+# source for hot reload. NEVER use this file in production - see
+# compose.prod.yaml and docs/adr/0003-deploy-by-sha.md for why.
+
+networks:
+  edge:       # frontend <-> backend. A normal bridge: has outbound internet
+              # access, which is exactly what lets `backend` reach Groq.
+    driver: bridge
+  internal:   # backend <-> database <-> cache. No route to the outside
+    driver: bridge
+    internal: true
+
+volumes:
+  pgdata:
+  redisdata:
+  ollama_models:
+
+services:
+  database:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-civicpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-civicpulse}
+      POSTGRES_DB: ${POSTGRES_DB:-civicpulse}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    # No published port here on purpose - only containers on `internal`
+    # can reach Postgres. Use `docker compose exec database psql ...` to
+    # get a shell instead of exposing 5432 to the host.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-civicpulse} -d ${POSTGRES_DB:-civicpulse}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+  cache:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - internal   # offline model - never needs to leave the machine
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 4G }
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-civicpulse}:${POSTGRES_PASSWORD:-civicpulse}@database:5432/${POSTGRES_DB:-civicpulse}
+      REDIS_URL: redis://cache:6379/0
+      TRIAGE_PROVIDER: ${TRIAGE_PROVIDER:-simulated}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:8080}
+    volumes:
+      # Dev-only bind mount for hot reload. Wrong in prod: it would let a
+      # host filesystem change silently replace what's in the built image.
+      - ./backend/app:/app/app:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    networks:
+      - edge       # so it can reach Groq's public endpoint
+      - internal   # so it can reach database/cache/ollama
+    depends_on:
+      database: { condition: service_healthy }
+      cache: { condition: service_healthy }
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"   # dev convenience only, gone in prod
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-}
+    networks:
+      - edge
+    depends_on:
+      backend: { condition: service_healthy }
+    ports:
+      - "${FRONTEND_PORT:-8080}:8080"
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128M }

@@ -1,0 +1,141 @@
+:root {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-text: #e2e8f0;
+  --color-muted: #94a3b8;
+  --color-accent: #38bdf8;
+  --color-high: #f87171;
+  --color-normal: #fbbf24;
+  --color-low: #34d399;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid #334155;
+}
+
+.app-header nav button {
+  margin-left: 0.5rem;
+  background: transparent;
+  border: 1px solid #334155;
+  color: var(--color-text);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.app-header nav button.active {
+  background: var(--color-accent);
+  color: #0f172a;
+  font-weight: 600;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+form { display: flex; flex-direction: column; gap: 0.25rem; max-width: 480px; }
+label { margin-top: 0.75rem; font-weight: 600; }
+input, textarea, select {
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: var(--color-text);
+}
+
+button {
+  margin-top: 1rem;
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  border: none;
+  background: var(--color-accent);
+  color: #0f172a;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.field-error, .form-error {
+  color: var(--color-high);
+  font-size: 0.9rem;
+}
+
+.loading-note { color: var(--color-muted); }
+
+.triage-result {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  background: #334155;
+}
+.badge-high { background: var(--color-high); color: #1c0a0a; }
+.badge-normal { background: var(--color-normal); color: #1c1400; }
+.badge-low { background: var(--color-low); color: #041b12; }
+.badge-open { background: #64748b; }
+.badge-in_progress { background: var(--color-accent); color: #06222e; }
+.badge-resolved { background: var(--color-low); color: #041b12; }
+.badge-rejected { background: #475569; }
+
+.filters { display: flex; gap: 1rem; margin-bottom: 1rem; }
+.filters label { display: flex; flex-direction: column; font-size: 0.85rem; margin: 0; }
+
+.complaints-table { width: 100%; border-collapse: collapse; }
+.complaints-table th, .complaints-table td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid #334155;
+  vertical-align: top;
+}
+.summary-cell { max-width: 260px; }
+.transition-buttons button {
+  margin: 0 0.25rem 0.25rem 0;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}
+.terminal-note { color: var(--color-muted); font-style: italic; }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.pagination button { margin-top: 0; }
+
+.stats-columns { display: flex; gap: 2rem; }
+.stats-columns ul { list-style: none; padding: 0; }
+.stats-columns li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.25rem 0; }
+
+.cache-indicator { font-size: 0.9rem; }
+
+.error-boundary {
+  padding: 1.5rem;
+  border: 1px solid var(--color-high);
+  border-radius: 8px;
+  margin: 1.5rem;
+}

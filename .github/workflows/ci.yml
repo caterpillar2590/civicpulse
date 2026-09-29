@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-type:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Backend lint + type check
+        working-directory: backend
+        run: |
+          pip install --break-system-packages -e ".[dev]"
+          ruff check .
+          mypy app
+      - name: Frontend lint + type check
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+
+  test-backend:
+    runs-on: ubuntu-latest
+    env:
+      TRIAGE_PROVIDER: simulated
+      DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+      REDIS_URL: "redis://localhost:6379/15"
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install
+        working-directory: backend
+        run: pip install --break-system-packages -e ".[dev]"
+      - name: pytest with coverage
+        working-directory: backend
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=65
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - working-directory: frontend
+        run: |
+          npm ci
+          npm run test
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint-and-type, test-backend, test-frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image (no push - a PR must not publish artifacts)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: civicpulse-backend:ci
+      - name: Build frontend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: false
+          tags: civicpulse-frontend:ci
+
+  scan:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with: { context: backend, push: false, tags: civicpulse-backend:ci, load: true }
+      - uses: docker/build-push-action@v6
+        with: { context: frontend, push: false, tags: civicpulse-frontend:ci, load: true }
+      - name: Trivy scan - backend
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: civicpulse-backend:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Trivy scan - frontend
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: civicpulse-frontend:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kustomize
+        run: |
+          curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz
+          sudo mv kustomize /usr/local/bin/
+      - name: Install kubeconform
+        run: |
+          curl -sL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar xz
+          sudo mv kubeconform /usr/local/bin/
+      - name: Validate prod overlay
+        run: kustomize build k8s/overlays/prod | kubeconform -strict -summary -ignore-missing-schemas
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up the stack
+        run: |
+          cp .env.example .env
+          echo "TRIAGE_PROVIDER=simulated" >> .env
+          docker compose -f compose.yaml up -d --build
+      - name: Wait for /ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/ready; then exit 0; fi
+            sleep 2
+          done
+          echo "backend never became ready"; docker compose logs; exit 1
+      - name: Submit a complaint and read it back
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:8000/api/complaints \
+            -H "Content-Type: application/json" \
+            -d '{"text":"Burst water main flooding the street since morning","location":"Street 12"}')
+          echo "$RESP"
+          echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['category'] in ['water','electricity','sanitation','roads','streetlights','other']"
+      - name: Assert stats cache MISS then HIT
+        run: |
+          MISS=$(curl -sI http://localhost:8000/api/stats | grep -i x-cache)
+          echo "$MISS" | grep -qi "MISS"
+          HIT=$(curl -sI http://localhost:8000/api/stats | grep -i x-cache)
+          echo "$HIT" | grep -qi "HIT"
+      - name: Tear down
+        if: always()
+        run: docker compose -f compose.yaml down -v

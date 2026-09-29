@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: civicpulse
+  labels:
+    app: backend
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: backend
+          image: ghcr.io/OWNER/civicpulse-backend:latest   # overridden per-overlay
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { configMapKeyRef: { name: civicpulse-config, key: POSTGRES_USER } }
+            - name: POSTGRES_DB
+              valueFrom: { configMapKeyRef: { name: civicpulse-config, key: POSTGRES_DB } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: civicpulse-secrets, key: POSTGRES_PASSWORD } }
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-svc:5432/$(POSTGRES_DB)"
+            - name: REDIS_URL
+              value: "redis://redis-svc:6379/0"
+            - name: TRIAGE_PROVIDER
+              valueFrom: { configMapKeyRef: { name: civicpulse-config, key: TRIAGE_PROVIDER } }
+            - name: GROQ_API_KEY
+              valueFrom: { secretKeyRef: { name: civicpulse-secrets, key: GROQ_API_KEY } }
+            - name: GROQ_MODEL
+              valueFrom: { configMapKeyRef: { name: civicpulse-config, key: GROQ_MODEL } }
+            - name: OLLAMA_BASE_URL
+              valueFrom: { configMapKeyRef: { name: civicpulse-config, key: OLLAMA_BASE_URL } }
+            - name: OLLAMA_MODEL
+              valueFrom: { configMapKeyRef: { name: civicpulse-config, key: OLLAMA_MODEL } }
+            - name: CORS_ALLOW_ORIGINS
+              valueFrom: { configMapKeyRef: { name: civicpulse-config, key: CORS_ALLOW_ORIGINS } }
+          resources:
+            # Mandatory: the HPA computes utilisation as usage/request. No
+            # requests.cpu here means the HPA sits at <unknown>/60% forever.
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          startupProbe:
+            httpGet: { path: /health, port: 8000 }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            # Restarts the pod - must NOT depend on the database, or a slow
+            # DB turns into a restart loop across the whole deployment.
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            # Removes the pod from the Service - SHOULD depend on the
+            # database/cache, which is exactly what /ready checks.
+            httpGet: { path: /ready, port: 8000 }
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # Give the Service/Endpoints controller time to remove this
+              # pod before it stops accepting connections - this is what
+              # makes the rolling-update demo show zero failed requests.
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]

@@ -1,0 +1,117 @@
+# Production compose file. Pulls pre-built, pinned images - never builds
+# from source, never bind-mounts, never publishes the database or cache
+# port to the host. Deploy by immutable tag (commit SHA or digest), never
+# `latest` - see docs/adr/0003-deploy-by-sha.md.
+
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  pgdata:
+  redisdata:
+  ollama_models:
+
+services:
+  database:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    # No `ports:` here - intentional. Never expose the database to the host.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 1G }
+        reservations: { cpus: "0.5", memory: 256M }
+
+  cache:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks:
+      - internal
+    # No `ports:` here either - same reasoning as database.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+        reservations: { cpus: "0.25", memory: 128M }
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "4.0", memory: 6G }
+
+  backend:
+    image: ${REGISTRY:-ghcr.io/OWNER/civicpulse-backend}:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      REDIS_URL: redis://cache:6379/0
+      TRIAGE_PROVIDER: ${TRIAGE_PROVIDER:-llm}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
+      ENVIRONMENT: production
+    networks:
+      - edge
+      - internal
+    depends_on:
+      database: { condition: service_healthy }
+      cache: { condition: service_healthy }
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 1G }
+        reservations: { cpus: "0.5", memory: 256M }
+
+  frontend:
+    image: ${REGISTRY:-ghcr.io/OWNER/civicpulse-frontend}:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-}
+    networks:
+      - edge
+    depends_on:
+      backend: { condition: service_healthy }
+    ports:
+      - "${FRONTEND_PORT:-8080}:8080"
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 256M }
+        reservations: { cpus: "0.1", memory: 64M }

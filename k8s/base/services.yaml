@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # Named "backend" (not "backend-svc") on purpose: frontend/nginx.conf's
+  # proxy_pass points to http://backend:8000, matching Compose's service
+  # name, so the same nginx.conf works unmodified in both environments.
+  name: backend
+  namespace: civicpulse
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-svc
+  namespace: civicpulse
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+    - port: 8080
+      targetPort: 8080

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: civicpulse-config
+  namespace: civicpulse
+data:
+  TRIAGE_PROVIDER: "simulated"   # overridden per-overlay; simulated is CI/dev-safe default
+  GROQ_MODEL: "llama-3.1-8b-instant"
+  # Ollama is not deployed to the cluster by default (it's the offline/dev
+  # path from Compose). If you add an ollama Deployment+Service, point this
+  # at it, e.g. http://ollama-svc:11434
+  OLLAMA_BASE_URL: "http://ollama-svc:11434"
+  OLLAMA_MODEL: "llama3.2:1b"
+  CORS_ALLOW_ORIGINS: "http://civicpulse.local"
+  POSTGRES_DB: "civicpulse"
+  POSTGRES_USER: "civicpulse"
